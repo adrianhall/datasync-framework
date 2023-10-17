@@ -1,4 +1,8 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.Datasync.Client.Converters;
+using Microsoft.Datasync.Client.Queue;
+using Microsoft.Datasync.Client.Sync;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Microsoft.Datasync.Client;
 
@@ -15,11 +19,41 @@ public class OfflineDbContext : DbContext
     /// <inheritdoc />
     protected OfflineDbContext() : base()
     {
+        QueueHandler = new QueueHandler(this);
     }
 
     /// <inheritdoc />
     public OfflineDbContext(DbContextOptions options) : base(options)
     {
+        QueueHandler = new QueueHandler(this);
+    }
+
+    /// <inheritdoc />
+    public override int SaveChanges()
+        => SaveChanges(true, QueueHandlerOptions.DefaultOptions);
+
+    /// <inheritdoc />
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+        => SaveChanges(acceptAllChangesOnSuccess, QueueHandlerOptions.DefaultOptions);
+
+    /// <inheritdoc />
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        => SaveChangesAsync(true, QueueHandlerOptions.DefaultOptions, cancellationToken);
+
+    /// <inheritdoc />
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+        => SaveChangesAsync(acceptAllChangesOnSuccess, QueueHandlerOptions.DefaultOptions, cancellationToken);
+
+    /// <inheritdoc />
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<OfflineOperationsQueueEntity>().Property(e => e.TransactionId).HasConversion<GuidValueConverter>();
+        modelBuilder.Entity<OfflineOperationsQueueEntity>().Property(e => e.CreatedAt).HasConversion<DateTimeOffsetValueConverter>();
+        modelBuilder.Entity<OfflineOperationsQueueEntity>().Property(e => e.UpdatedAt).HasConversion<DateTimeOffsetValueConverter>();
+        modelBuilder.Entity<OfflineOperationsQueueEntity>().Property(e => e.OperationType).HasConversion<string>();
+        modelBuilder.Entity<OfflineOperationsQueueEntity>().Property(e => e.EntityType).HasConversion<TypeValueConverter>();
+
+        base.OnModelCreating(modelBuilder);
     }
 
     /// <summary>
@@ -39,7 +73,76 @@ public class OfflineDbContext : DbContext
     /// </summary>
     internal DbSet<OfflineSynchronizationEntity> OfflineSynchronizations => Set<OfflineSynchronizationEntity>();
 
-    // TODO: SaveChanges
+    /// <summary>
+    /// The queue handler that updates the <see cref="OfflineOperationsQueue"/> when changes are made to the <see cref="DbContext"/>.
+    /// </summary>
+    internal IQueueHandler QueueHandler { get; }
 
-    // TODO: SaveChangesAsync
+    /// <summary>
+    /// Saves all changes made in this context to the underlying database.
+    /// </summary>
+    /// <param name="acceptAllChangesOnSuccess">Indicates whether <c>AcceptAllChanges()</c> is called after the changes
+    /// have been sent successfully to the database.</param>
+    /// <param name="options">The options for controlling queue behavior when adding a change to the <see cref="OfflineOperationsQueue"/>.</param>
+    /// <returns>The number of state entries written to the database.</returns>
+    /// <exception cref="DbUpdateException">An error is encountered while saving to the database.</exception>
+    /// <exception cref="DbUpdateConcurrencyException">A concurrency violation is encountered while saving to the database. A concurrency violation 
+    /// occurs when an unexpected number of rows are affected during save. This is usually because the data in the database has been modified since 
+    /// it was loaded into memory.</exception>
+    /// <exception cref="OperationCanceledException">If the <see cref="CancellationToken"/> is cancelled.</exception>
+    /// <exception cref="OfflineOperationsQueueException">An error occurred attempting to add an operation to the offline operations queue.</exception>
+    internal int SaveChanges(bool acceptAllChangesOnSuccess, QueueHandlerOptions options)
+    {
+        if (ChangeTracker.AutoDetectChangesEnabled)
+        {
+            ChangeTracker.DetectChanges();
+        }
+
+        if (options.AddChangesToQueue)
+        {
+            foreach (var change in ChangeTracker.Entries())
+            {
+                // Skip any change that belongs to the OfflineOperationsQueue or OfflineSynchronizations DbSet.
+                if (change.Entity is OfflineOperationsQueueEntity || change.Entity is OfflineSynchronizationEntity)
+                {
+                    continue;
+                }
+                QueueHandler.Add(change, options);
+            }
+        }
+
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    /// <summary>
+    /// Saves all changes made in this context to the underlying database.
+    /// </summary>
+    /// <param name="acceptAllChangesOnSuccess">Indicates whether <c>AcceptAllChanges()</c> is called after the changes
+    /// have been sent successfully to the database.</param>
+    /// <param name="options">The options for controlling queue behavior when adding a change to the <see cref="OfflineOperationsQueue"/>.</param>
+    /// <param name="cancellationToken">A <see cref="CancellationToken"/> to observe while waiting for the task to complete.</param>
+    /// <returns>A task that represents the asynchronous save operation. The task result contains the number of state entries written to the database.</returns>
+    /// <exception cref="DbUpdateException">An error is encountered while saving to the database.</exception>
+    /// <exception cref="DbUpdateConcurrencyException">A concurrency violation is encountered while saving to the database. A concurrency violation 
+    /// occurs when an unexpected number of rows are affected during save. This is usually because the data in the database has been modified since 
+    /// it was loaded into memory.</exception>
+    /// <exception cref="OperationCanceledException">If the <see cref="CancellationToken"/> is cancelled.</exception>
+    /// <exception cref="OfflineOperationsQueueException">An error occurred attempting to add an operation to the offline operations queue.</exception>
+    internal async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, QueueHandlerOptions options, CancellationToken cancellationToken)
+    {
+        if (ChangeTracker.AutoDetectChangesEnabled)
+        {
+            ChangeTracker.DetectChanges();
+        }
+
+        if (options.AddChangesToQueue)
+        {
+            foreach (var change in ChangeTracker.Entries())
+            {
+                await QueueHandler.AddAsync(change, options, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken).ConfigureAwait(false);
+    }
 }
