@@ -118,7 +118,7 @@ public class OfflineDbContext : DbContext
     /// it was loaded into memory.</exception>
     /// <exception cref="OperationCanceledException">If the <see cref="CancellationToken"/> is cancelled.</exception>
     /// <exception cref="OfflineOperationsQueueException">An error occurred attempting to add an operation to the offline operations queue.</exception>
-    internal async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, QueueHandlerOptions options, CancellationToken cancellationToken)
+    internal async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, QueueHandlerOptions options, CancellationToken cancellationToken = default)
     {
         if (ChangeTracker.AutoDetectChangesEnabled)
         {
