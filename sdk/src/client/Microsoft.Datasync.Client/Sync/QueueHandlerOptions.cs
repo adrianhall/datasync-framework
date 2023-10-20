@@ -1,4 +1,4 @@
-﻿namespace Microsoft.Datasync.Client.Queue;
+﻿namespace Microsoft.Datasync.Client.Sync;
 
 internal class QueueHandlerOptions
 {

@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace Microsoft.Datasync.Client.Queue;
+namespace Microsoft.Datasync.Client.Sync;
 
 /// <summary>
 /// The type of operation within the offline operations queue.
