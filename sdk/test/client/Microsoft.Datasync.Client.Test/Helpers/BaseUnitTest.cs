@@ -6,7 +6,7 @@ namespace Microsoft.Datasync.Client.Test;
 [ExcludeFromCodeCoverage]
 public abstract class BaseUnitTest
 {
-    public TestDbContext CreateContext()
+    public static TestDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<TestDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
@@ -25,4 +25,18 @@ public abstract class BaseUnitTest
         options.Excluding(x => x.UpdatedAt);
         return options;
     }
+
+    /// <summary>
+    /// Copies a queue entity for comparison later.
+    /// </summary>
+    protected static OfflineOperationsQueueEntity CopyOf(OfflineOperationsQueueEntity entity) => new()
+    {
+        TransactionId = entity.TransactionId,
+        CreatedAt = entity.CreatedAt,
+        UpdatedAt = entity.UpdatedAt,
+        OperationType = entity.OperationType,
+        EntityId = entity.EntityId,
+        EntityType = Type.GetType(entity.EntityType.FullName!)!,
+        SerializedEntity = entity.SerializedEntity
+    };
 }

@@ -7,6 +7,7 @@ namespace Microsoft.Datasync.Client.Test;
 public class RemoteDefaultEntity
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string Name { get; set; } = string.Empty;
 }
 
 [ExcludeFromCodeCoverage]
@@ -14,10 +15,12 @@ public class RemoteDefaultEntity
 public class  RemotePathEntity
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string Name { get; set; } = string.Empty;
 }
 
 [ExcludeFromCodeCoverage]
 public class OfflineOnlyEntity
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string Name { get; set; } = string.Empty;
 }

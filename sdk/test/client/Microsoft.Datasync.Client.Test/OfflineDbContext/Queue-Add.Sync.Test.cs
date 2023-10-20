@@ -13,7 +13,7 @@ public partial class OfflineDbContext_Tests
         var entity = new RemoteDefaultEntity();
 
         var start = DateTimeOffset.UtcNow;
-        context.Add(entity);
+        context.RemoteDefaultEntities.Add(entity);
         context.SaveChanges();
         var end = DateTimeOffset.UtcNow;
 
@@ -40,7 +40,7 @@ public partial class OfflineDbContext_Tests
         var entity = new RemotePathEntity();
 
         var start = DateTimeOffset.UtcNow;
-        context.Add(entity);
+        context.RemotePathEntities.Add(entity);
         context.SaveChanges();
         var end = DateTimeOffset.UtcNow;
 
@@ -66,7 +66,7 @@ public partial class OfflineDbContext_Tests
         var context = CreateContext();
         var entity = new OfflineOnlyEntity();
 
-        context.Add(entity);
+        context.OfflineOnlyEntities.Add(entity);
         context.SaveChanges();
 
         context.OfflineOperationsQueue.Should().HaveCount(0);
@@ -87,7 +87,7 @@ public partial class OfflineDbContext_Tests
             SerializedEntity = JsonSerializer.Serialize(entity, context.SerializerOptions)
         };
 
-        context.Add(queueEntity);
+        context.OfflineOperationsQueue.Add(queueEntity);
         context.SaveChanges();
         context.OfflineOperationsQueue.Should().HaveCount(1); // The one we inserted.
 
@@ -107,7 +107,7 @@ public partial class OfflineDbContext_Tests
             LastSynchronizationSequence = 42L
         };
 
-        context.Add(queueEntity);
+        context.OfflineSynchronizations.Add(queueEntity);
         context.SaveChanges();
         context.OfflineOperationsQueue.Should().HaveCount(0);
     }
@@ -117,9 +117,92 @@ public partial class OfflineDbContext_Tests
     {
         var context = CreateContext();
         var entity = new RemoteDefaultEntity { Id = string.Empty };
-        context.Add(entity);
+        context.RemoteDefaultEntities.Add(entity);
         Action act = () => _ = context.SaveChanges();
         act.Should().Throw<InvalidEntityException>();
+    }
+    #endregion
+
+    #region Queue Updates
+    [Fact]
+    public void QueueAdd_FollowedByAdd_Throws()
+    {
+        var context = CreateContext();
+        var entity = new RemoteDefaultEntity();
+        
+        var queueEntity = new OfflineOperationsQueueEntity()
+        {
+            OperationType = OperationType.Add,
+            EntityType = typeof(RemoteDefaultEntity),
+            EntityId = entity.Id,
+            SerializedEntity = JsonSerializer.Serialize(entity, context.SerializerOptions)
+        };
+        context.OfflineOperationsQueue.Add(queueEntity);
+        context.SaveChanges(true, new QueueHandlerOptions { AddChangesToQueue = false });
+
+        context.RemoteDefaultEntities.Add(entity);
+        Action act = () => _ = context.SaveChanges();
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void QueueAdd_FollowedByDelete_DeletedQueueEntry()
+    {
+        var context = CreateContext();
+        var entity = new RemoteDefaultEntity();
+
+        var queueEntity = new OfflineOperationsQueueEntity()
+        {
+            OperationType = OperationType.Add,
+            EntityType = typeof(RemoteDefaultEntity),
+            EntityId = entity.Id,
+            SerializedEntity = JsonSerializer.Serialize(entity, context.SerializerOptions)
+        };
+        context.OfflineOperationsQueue.Add(queueEntity);
+        context.RemoteDefaultEntities.Add(entity);
+        context.SaveChanges(true, new QueueHandlerOptions { AddChangesToQueue = false });
+
+        context.RemoteDefaultEntities.Remove(entity);
+        context.SaveChanges();
+
+        context.OfflineOperationsQueue.Should().HaveCount(0);
+    }
+
+    [Fact]
+    public void QueueAdd_FollowedByUpdate_UpdatesQueueEntry()
+    {
+        var context = CreateContext();
+        var entity = new RemoteDefaultEntity();
+
+        var queueEntity = new OfflineOperationsQueueEntity()
+        {
+            OperationType = OperationType.Add,
+            EntityType = typeof(RemoteDefaultEntity),
+            EntityId = entity.Id,
+            SerializedEntity = JsonSerializer.Serialize(entity, context.SerializerOptions)
+        };
+        context.OfflineOperationsQueue.Add(queueEntity);
+        context.RemoteDefaultEntities.Add(entity);
+        context.SaveChanges(true, new QueueHandlerOptions { AddChangesToQueue = false });
+
+        var originalQueueEntity = CopyOf(queueEntity);
+
+        var start = DateTimeOffset.UtcNow;
+        entity.Name = "Updated";
+        context.RemoteDefaultEntities.Update(entity);
+        context.SaveChanges();
+
+        context.OfflineOperationsQueue.Should().HaveCount(1); // The one we inserted, then updated.
+
+        var storedEntity = context.OfflineOperationsQueue.First();
+        storedEntity.TransactionId.Should().Be(originalQueueEntity.TransactionId);
+        storedEntity.CreatedAt.Should().Be(originalQueueEntity.CreatedAt);
+        storedEntity.UpdatedAt.Should().BeAfter(start);
+        storedEntity.OperationType.Should().Be(OperationType.Add);
+        storedEntity.EntityId.Should().Be(entity.Id);
+        storedEntity.EntityType.Should().Be(typeof(RemoteDefaultEntity));
+        storedEntity.SerializedEntity.Should().Be(JsonSerializer.Serialize(entity, context.SerializerOptions));
     }
     #endregion
 }

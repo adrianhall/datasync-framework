@@ -1,8 +1,9 @@
 ﻿using Microsoft.Datasync.Client.Sync;
 using System.ComponentModel.DataAnnotations;
-using System.Runtime.Serialization;
 
 namespace Microsoft.Datasync.Client.Test;
+
+#nullable disable
 
 [ExcludeFromCodeCoverage]
 public partial class OfflineDbContext_Tests : BaseUnitTest
@@ -22,6 +23,8 @@ public partial class OfflineDbContext_Tests : BaseUnitTest
     [InlineData(typeof(Bad_MultipleIds))]
     [InlineData(typeof(Bad_NoIds))]
     [InlineData(typeof(Bad_WrongIdType))]
+    [InlineData(typeof(Bad_WrongKeyType))]
+    [InlineData(typeof(Bad_NullId))]
     public void GetEntityId_InvalidObjects_Throws(Type type)
     {
         object entity = Activator.CreateInstance(type)!;
@@ -101,6 +104,12 @@ public partial class OfflineDbContext_Tests : BaseUnitTest
     {
         [Key]
         public int MyId { get; set; }
+    }
+
+    public class Bad_NullId
+    {
+        [Key]
+        public string Id { get; set; } = null;
     }
     #endregion
 

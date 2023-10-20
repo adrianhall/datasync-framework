@@ -163,7 +163,7 @@ public class OfflineDbContext : DbContext
             throw new InvalidEntityException("You must specify an ID for a remote entity.");
         }
 
-        OfflineOperationsQueueEntity? existingEntity = OfflineOperationsQueue.FirstOrDefault(x => x.EntityType == entityType && x.EntityId == entityId);
+        OfflineOperationsQueueEntity? existingEntity = GetOperationsQueueEntity(entityType, entityId);
         if (existingEntity is not null)
         {
             // Each operation type has a different behavior.
@@ -258,13 +258,23 @@ public class OfflineDbContext : DbContext
         }
 
         var idProperty = properties[0];
+        object idValue = idProperty.GetValue(entity) ?? throw new InvalidEntityException("Id value cannot be null.");
         return idProperty.PropertyType switch
         {
-            Type t when t == typeof(string) => (string?)idProperty.GetValue(entity),
-            Type t when t == typeof(Guid) => ((Guid?)idProperty.GetValue(entity))?.ToString("D"),
+            Type t when t == typeof(string) => (string?)idValue,
+            Type t when t == typeof(Guid) => ((Guid)idValue).ToString("D"),
             _ => throw new InvalidEntityException("The ID of a remote entity must be a string or a Guid.")
         };
     }
+
+    /// <summary>
+    /// Retrieves a queue entity based on the type and ID of the change.
+    /// </summary>
+    /// <param name="entityType">The entity.</param>
+    /// <param name="entityId">The ID for the entity.</param>
+    /// <returns>The queue entity, or null if one does not exist.</returns>
+    internal OfflineOperationsQueueEntity? GetOperationsQueueEntity(Type entityType, string entityId)
+        => OfflineOperationsQueue.AsEnumerable().FirstOrDefault(e => e.EntityType == entityType && e.EntityId == entityId);
 
     /// <summary>
     /// A conversion method to convert between an <see cref="EntityState"/> and an <see cref="OperationType"/>.
