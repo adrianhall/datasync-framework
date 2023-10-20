@@ -10,25 +10,25 @@ namespace Microsoft.Datasync.Client;
 /// type or that the framework cannot find the ID of the entity.
 /// </summary>
 [ExcludeFromCodeCoverage]
-internal class IllegalEntityException : DatasyncFrameworkException
+internal class InvalidEntityException : DatasyncFrameworkException
 {
     /// <inheritdoc />
-    public IllegalEntityException()
+    public InvalidEntityException()
     {
     }
 
     /// <inheritdoc />
-    public IllegalEntityException(string? message) : base(message)
+    public InvalidEntityException(string? message) : base(message)
     {
     }
 
     /// <inheritdoc />
-    public IllegalEntityException(SerializationInfo info, StreamingContext context) : base(info, context)
+    public InvalidEntityException(SerializationInfo info, StreamingContext context) : base(info, context)
     {
     }
 
     /// <inheritdoc />
-    public IllegalEntityException(string? message, Exception? innerException) : base(message, innerException)
+    public InvalidEntityException(string? message, Exception? innerException) : base(message, innerException)
     {
     }
 }

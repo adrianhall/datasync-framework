@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using System.ComponentModel.DataAnnotations;
 using System.Reflection;
+using System.Text.Json;
 
 namespace Microsoft.Datasync.Client;
 
@@ -22,13 +23,6 @@ public class OfflineDbContext : DbContext
     /// </summary>
     private readonly Dictionary<Type, bool> remoteEntities = new();
 
-    /// <summary>
-    /// Used for testing purposes, allowing the queue handler to be specified.
-    /// </summary>
-    internal OfflineDbContext() : base()
-    {
-    }
-
     /// <inheritdoc />
     public OfflineDbContext(DbContextOptions options) : base(options)
     {
@@ -36,7 +30,7 @@ public class OfflineDbContext : DbContext
 
     /// <inheritdoc />
     public override int SaveChanges()
-        => SaveChanges(true, QueueHandlerOptions.DefaultOptions);
+        => SaveChanges(true);
 
     /// <inheritdoc />
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -44,7 +38,7 @@ public class OfflineDbContext : DbContext
 
     /// <inheritdoc />
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
-        => SaveChangesAsync(true, QueueHandlerOptions.DefaultOptions, cancellationToken);
+        => SaveChangesAsync(true, cancellationToken);
 
     /// <inheritdoc />
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
@@ -67,6 +61,11 @@ public class OfflineDbContext : DbContext
     /// queue and the date/time that a <see cref="DbSet{TEntity}"/> was last synchronized to the server.
     /// </summary>
     public ISynchronizationProvider SynchronizationProvider { get; init; } = new NullSynchronizationProvider();
+
+    /// <summary>
+    /// The serializer options to use for serializing and deserializing entities.
+    /// </summary>
+    public JsonSerializerOptions SerializerOptions { get; set; } = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 
     /// <summary>
     /// The operations queue holds the operations that have been performed on a specific <see cref="DbSet{TEntity}"/> since
@@ -138,9 +137,10 @@ public class OfflineDbContext : DbContext
     /// <param name="changes">The set of changes to process.</param>
     internal void AddChangesToQueue(IEnumerable<EntityEntry> changes)
     {
-        foreach (var change in changes.Where(c => !IsOfflineDataset(c) && IsDataChange(c)))
+        var inscopeChanges = changes.Where(c => !IsOfflineDataset(c) && IsDataChange(c)).ToList();
+        for (int idx = 0; idx < inscopeChanges.Count; idx++) 
         {
-            AddChangeToQueue(change);
+            AddChangeToQueue(inscopeChanges[idx]);
         }
     }
 
@@ -148,6 +148,7 @@ public class OfflineDbContext : DbContext
     /// Adds a single change to the operations queue (without saving it to the database).
     /// </summary>
     /// <param name="change">The change to process.</param>
+    /// <exception cref="InvalidOperationException">Thrown if the change is invalid within the change tracker.</exception>
     internal void AddChangeToQueue(EntityEntry change)
     {
         if (!IsRemoteEntity(change.Entity))
@@ -159,7 +160,7 @@ public class OfflineDbContext : DbContext
         string? entityId = GetEntityId(change.Entity);
         if (string.IsNullOrWhiteSpace(entityId))
         {
-            throw new IllegalEntityException("You must specify an ID for a remote entity.");
+            throw new InvalidEntityException("You must specify an ID for a remote entity.");
         }
 
         OfflineOperationsQueueEntity? existingEntity = OfflineOperationsQueue.FirstOrDefault(x => x.EntityType == entityType && x.EntityId == entityId);
@@ -171,7 +172,7 @@ public class OfflineDbContext : DbContext
                 switch (change.State)
                 {
                     case EntityState.Added:
-                        throw new IllegalOperationException("Cannot add an entity that has already been added to the offline operations queue.");
+                        throw new InvalidOperationException("Cannot add an entity that has already been added to the offline operations queue.");
                     case EntityState.Modified:
                         existingEntity.SerializedEntity = SerializeEntity(change.Entity);
                         existingEntity.UpdatedAt = DateTimeOffset.UtcNow;
@@ -187,11 +188,11 @@ public class OfflineDbContext : DbContext
                 switch (change.State)
                 {
                     case EntityState.Added:
-                        throw new IllegalOperationException("Cannot add an entity after it has been deleted.  Either revert the delete or use a new entity ID.");
+                        throw new InvalidOperationException("Cannot add an entity after it has been deleted.  Either revert the delete or use a new entity ID.");
                     case EntityState.Modified:
-                        throw new IllegalOperationException("Cannot modify an entity after it has been deleted.  Either revert the delete or use a new entity ID.");
+                        throw new InvalidOperationException("Cannot modify an entity after it has been deleted.  Either revert the delete or use a new entity ID.");
                     case EntityState.Deleted:
-                        throw new IllegalOperationException("Cannot delete an entity that has already been deleted.");
+                        throw new InvalidOperationException("Cannot delete an entity that has already been deleted.");
                 }
             }
             else if (existingEntity.OperationType == OperationType.Replace)
@@ -199,7 +200,7 @@ public class OfflineDbContext : DbContext
                 switch (change.State)
                 {
                     case EntityState.Added:
-                        throw new IllegalOperationException("Cannot add an entity after it already exists.");
+                        throw new InvalidOperationException("Cannot add an entity after it already exists.");
                     case EntityState.Modified:
                         existingEntity.SerializedEntity = SerializeEntity(change.Entity);
                         existingEntity.UpdatedAt = DateTimeOffset.UtcNow;
@@ -234,25 +235,25 @@ public class OfflineDbContext : DbContext
     /// </remarks>
     /// <param name="entity">The entity to process.</param>
     /// <returns>The entity ID as a string.</returns>
-    /// <exception cref="IllegalEntityException">if the entity does not have a suitable ID property.</exception>
+    /// <exception cref="InvalidEntityException">if the entity does not have a suitable ID property.</exception>
     internal static string? GetEntityId(object entity)
     {
         // does the entity have a property with the key attribute?
         var properties = entity.GetType().GetProperties().Where(p => p.GetCustomAttribute<KeyAttribute>() is not null).ToList();
         if (properties.Count > 1)
         {
-            throw new IllegalEntityException("Cannot have more than one key within a remote entity.");
+            throw new InvalidEntityException("Cannot have more than one key within a remote entity.");
         }
         if (properties.Count == 0)
         {
             properties = entity.GetType().GetProperties().Where(p => p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase)).ToList();
             if (properties.Count > 1)
             {
-                throw new IllegalEntityException("Cannot have more than one property with the name 'Id' within a remote entity.  Consider marking the correct one with the [Key] attribute.");
+                throw new InvalidEntityException("Cannot have more than one property with the name 'Id' within a remote entity.  Consider marking the correct one with the [Key] attribute.");
             }
             if (properties.Count == 0)
             {
-                throw new IllegalEntityException("You must specify an 'Id' for a remote entity.");
+                throw new InvalidEntityException("You must specify an 'Id' for a remote entity.");
             }
         }
 
@@ -261,7 +262,7 @@ public class OfflineDbContext : DbContext
         {
             Type t when t == typeof(string) => (string?)idProperty.GetValue(entity),
             Type t when t == typeof(Guid) => ((Guid?)idProperty.GetValue(entity))?.ToString("D"),
-            _ => throw new IllegalEntityException("The ID of a remote entity must be a string or a Guid.")
+            _ => throw new InvalidEntityException("The ID of a remote entity must be a string or a Guid.")
         };
     }
 
@@ -307,7 +308,7 @@ public class OfflineDbContext : DbContext
     /// </remarks>
     /// <param name="entity">The entity to check.</param>
     /// <returns><c>true</c> if the entity is a remote entity.</returns>
-    /// <exception cref="IllegalEntityException">Thrown if there is a RemoteTableEntity attribute, but no suitable ID property could be found.</exception>
+    /// <exception cref="InvalidEntityException">Thrown if there is a RemoteTableEntity attribute, but no suitable ID property could be found.</exception>
     internal bool IsRemoteEntity(object entity)
     {
         var entityType = entity.GetType();
@@ -340,10 +341,7 @@ public class OfflineDbContext : DbContext
     /// </summary>
     /// <param name="entity">The entity to serialize.</param>
     /// <returns>The serialized entity.</returns>
-    /// <exception cref="IllegalEntityException">Thrown if the entity cannot be serialized.</exception>
+    /// <exception cref="InvalidEntityException">Thrown if the entity cannot be serialized.</exception>
     internal string SerializeEntity(object entity)
-    {
-        // TODO: Implement serialization.
-        throw new NotImplementedException();
-    }
+        => JsonSerializer.Serialize(entity, entity.GetType(), SerializerOptions);
 }

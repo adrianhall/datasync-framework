@@ -1,4 +1,4 @@
-﻿namespace Microsoft.Datasync.Client.Helpers;
+﻿namespace Microsoft.Datasync.Client.Test;
 
 [ExcludeFromCodeCoverage]
 public class TestDbContext : OfflineDbContext
@@ -7,5 +7,7 @@ public class TestDbContext : OfflineDbContext
     { 
     }
 
-    public DbSet<TestEntity> TestEntities => Set<TestEntity>();
+    public DbSet<RemoteDefaultEntity> RemoteDefaultEntities => Set<RemoteDefaultEntity>();
+    public DbSet<RemotePathEntity> RemotePathEntities => Set<RemotePathEntity>();
+    public DbSet<OfflineOnlyEntity> OfflineOnlyEntities => Set<OfflineOnlyEntity>();
 }
