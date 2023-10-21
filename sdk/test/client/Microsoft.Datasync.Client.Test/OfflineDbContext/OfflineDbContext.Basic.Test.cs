@@ -1,5 +1,7 @@
 ﻿using Microsoft.Datasync.Client.Sync;
+using NSubstitute;
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 
 namespace Microsoft.Datasync.Client.Test;
 
@@ -16,6 +18,52 @@ public partial class OfflineDbContext_Tests : BaseUnitTest
         context.SynchronizationProvider.Should().NotBeNull();
         context.SerializerOptions.Should().NotBeNull();
     }
+
+    #region Properties
+    [Fact]
+    public void CanSetSerializerOptions()
+    {
+        var context = CreateContext();
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.General);
+        context.SerializerOptions = options;
+        context.SerializerOptions.Should().BeSameAs(options);
+    }
+
+    [Fact]
+    public void CanSetSynchronizationProvider()
+    {
+        var context = CreateContext();
+        var provider = Substitute.For<ISynchronizationProvider>();
+        context.SynchronizationProvider = provider;
+        context.SynchronizationProvider.Should().BeSameAs(provider);
+    }
+    #endregion
+
+    #region AddChangeToQueue
+    [Theory]
+    [InlineData(OperationType.Add)]
+    [InlineData(OperationType.Delete)]
+    [InlineData(OperationType.Replace)]
+    public void AddChangeToQueue_Unchanges_DoesntChangeQueue(OperationType op)
+    {
+        var context = CreateContext();
+        var entity = new RemoteDefaultEntity();
+        var queueEntity = new OfflineOperationsQueueEntity()
+        {
+            OperationType = op,
+            EntityType = typeof(RemoteDefaultEntity),
+            EntityId = entity.Id,
+            SerializedEntity = JsonSerializer.Serialize(entity, context.SerializerOptions)
+        };
+        context.OfflineOperationsQueue.Add(queueEntity);
+        context.RemoteDefaultEntities.Add(entity);
+        context.SaveChanges(true, new QueueHandlerOptions { AddChangesToQueue = false });
+
+        var entityEntry = context.Entry(entity);
+        context.AddChangeToQueue(entityEntry);
+        context.OfflineOperationsQueue.Should().HaveCount(1);
+    }
+    #endregion
 
     #region GetEntityId
     [Theory]
@@ -43,6 +91,48 @@ public partial class OfflineDbContext_Tests : BaseUnitTest
         object entity = Activator.CreateInstance(type)!;
         string? id = OfflineDbContext.GetEntityId(entity);
         id.Should().NotBeNullOrEmpty().And.Be(expected);
+    }
+    #endregion
+
+    #region GetOperationsQueueEntity
+    [Theory]
+    [InlineData(typeof(RemoteDefaultEntity), "matching-id")]
+    [InlineData(typeof(RemotePathEntity), "non-matching-id")]
+    public void GetOperationsQueueEntity_ReturnsNull_WhenNoMatch(Type type, string id)
+    {
+        var context = CreateContext();
+        var entity = new RemotePathEntity();
+        var queueEntity = new OfflineOperationsQueueEntity()
+        {
+            OperationType = OperationType.Add,
+            EntityType = typeof(RemotePathEntity),
+            EntityId = "matching-id",
+            SerializedEntity = JsonSerializer.Serialize(entity, context.SerializerOptions)
+        };
+        context.OfflineOperationsQueue.Add(queueEntity);
+        context.SaveChanges();
+
+        var actual = context.GetOperationsQueueEntity(type, id);
+        actual.Should().BeNull();
+    }
+
+    [Fact]
+    public void GetOperationsQueueEntity_ReturnsEntity_WhenMatched()
+    {
+        var context = CreateContext();
+        var entity = new RemotePathEntity();
+        var queueEntity = new OfflineOperationsQueueEntity()
+        {
+            OperationType = OperationType.Add,
+            EntityType = typeof(RemotePathEntity),
+            EntityId = "matching-id",
+            SerializedEntity = JsonSerializer.Serialize(entity, context.SerializerOptions)
+        };
+        context.OfflineOperationsQueue.Add(queueEntity);
+        context.SaveChanges();
+
+        var actual = context.GetOperationsQueueEntity(typeof(RemotePathEntity), "matching-id");
+        actual.Should().BeEquivalentTo(queueEntity);
     }
     #endregion
 

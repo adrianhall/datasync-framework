@@ -60,7 +60,7 @@ public class OfflineDbContext : DbContext
     /// The synchronization provider is used for maintaining the offline cache.  It specifically maintains the operations
     /// queue and the date/time that a <see cref="DbSet{TEntity}"/> was last synchronized to the server.
     /// </summary>
-    public ISynchronizationProvider SynchronizationProvider { get; init; } = new NullSynchronizationProvider();
+    public ISynchronizationProvider SynchronizationProvider { get; set; } = new NullSynchronizationProvider();
 
     /// <summary>
     /// The serializer options to use for serializing and deserializing entities.
